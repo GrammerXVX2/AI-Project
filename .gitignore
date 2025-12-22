@@ -63,8 +63,8 @@ Thumbs.db
 rag_db/
 chats/
 models/
-RAG data/
 TEST_response_AI/
+# RAG data/ - uncomment to ignore large datasets
 *.json
 *.pkl
 *.pickle
