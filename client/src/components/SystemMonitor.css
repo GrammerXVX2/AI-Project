@@ -1,0 +1,203 @@
+.system-monitor {
+  background-color: #212121;
+  border-top: 1px solid #333;
+  padding: 1rem;
+  font-size: 0.8rem;
+  color: #ececec;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.monitor-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.system-monitor.loading {
+  color: #666;
+  text-align: center;
+  font-style: italic;
+}
+
+.monitor-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.monitor-label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  width: 60px;
+  color: #b4b4b4;
+}
+
+.monitor-bar-container {
+  flex: 1;
+  height: 6px;
+  background-color: #333;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.monitor-bar {
+  height: 100%;
+  transition: width 0.5s ease, background-color 0.5s ease;
+}
+
+.monitor-text {
+  width: 45px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: #888;
+}
+
+.temp-row {
+  justify-content: flex-end;
+  color: #888;
+  font-size: 0.75rem;
+  margin-top: -0.2rem;
+}
+
+/* Models Section */
+.models-section {
+  border-top: 1px solid #333;
+  padding-top: 0.8rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.section-title {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  color: #666;
+  font-weight: 600;
+  margin-bottom: 0.2rem;
+}
+
+.model-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.4rem;
+  background-color: #2a2a2a;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  transition: all 0.3s ease;
+}
+
+.model-row.active {
+  border-color: #10a37f;
+  background-color: rgba(16, 163, 127, 0.1);
+}
+
+.model-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.model-name {
+  font-weight: 500;
+  color: #ddd;
+}
+
+.model-meta {
+  font-size: 0.7rem;
+  color: #888;
+}
+
+.model-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.model-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.mode-select {
+  background-color: #222;
+  color: #aaa;
+  border: 1px solid #444;
+  border-radius: 4px;
+  font-size: 0.65rem;
+  padding: 2px 4px;
+  outline: none;
+  cursor: pointer;
+}
+
+.mode-select:hover {
+  border-color: #666;
+  color: #fff;
+}
+
+.toggle-btn {
+  background: none;
+  border: 1px solid #444;
+  color: #aaa;
+  font-size: 0.65rem;
+  padding: 2px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.toggle-btn:hover {
+  border-color: #666;
+  color: #fff;
+}
+
+.toggle-btn.load {
+  color: #10a37f;
+  border-color: #10a37f;
+}
+
+.toggle-btn.load:hover {
+  background-color: rgba(16, 163, 127, 0.1);
+}
+
+.toggle-btn.unload {
+  color: #ef4444;
+  border-color: #ef4444;
+}
+
+.toggle-btn.unload:hover {
+  background-color: rgba(239, 68, 68, 0.1);
+}
+
+.status-badge {
+  font-size: 0.7rem;
+  padding: 2px 6px;
+  border-radius: 10px;
+  font-weight: 500;
+}
+
+.status-badge.idle {
+  background-color: #333;
+  color: #888;
+}
+
+.status-badge.unloaded {
+  background-color: #222;
+  color: #555;
+  border: 1px solid #333;
+}
+
+.status-badge.active {
+  background-color: #10a37f;
+  color: white;
+  animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+  0% { opacity: 1; }
+  50% { opacity: 0.7; }
+  100% { opacity: 1; }
+}

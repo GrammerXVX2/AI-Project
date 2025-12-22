@@ -1,0 +1,419 @@
+import { useState, useRef, useEffect } from 'react'
+import { Send, Bot, User, Loader2, Paperclip, MessageSquare, Plus, Square, Trash2, Settings } from 'lucide-react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import { SystemMonitor } from './components/SystemMonitor'
+import { SettingsModal } from './components/SettingsModal'
+import { MessageContent } from './components/MessageContent'
+import './App.css'
+
+function App() {
+  const [messages, setMessages] = useState([
+    { role: 'assistant', content: 'Привет! Я ваш AI-помощник. Чем могу помочь с кодом сегодня?' }
+  ])
+  const [input, setInput] = useState('')
+  const [isLoading, setIsLoading] = useState(false)
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false)
+  
+  // Helper for lazy state initialization
+  const getStoredSetting = (key, defaultValue) => {
+    try {
+      const savedSettings = localStorage.getItem('ai-chat-settings')
+      if (savedSettings) {
+        const settings = JSON.parse(savedSettings)
+        return settings[key] !== undefined ? settings[key] : defaultValue
+      }
+    } catch (e) {
+      console.error('Error reading settings', e)
+    }
+    return defaultValue
+  }
+
+  // Settings State with Lazy Initialization
+  const [useRag, setUseRag] = useState(() => getStoredSetting('useRag', true))
+  const [historyLimit, setHistoryLimit] = useState(() => getStoredSetting('historyLimit', 5))
+  const [maxTokens, setMaxTokens] = useState(() => getStoredSetting('maxTokens', 512))
+  const [temperature, setTemperature] = useState(() => getStoredSetting('temperature', 0.7))
+  const [repeatPenalty, setRepeatPenalty] = useState(() => getStoredSetting('repeatPenalty', 1.1))
+  const [preferredLanguage, setPreferredLanguage] = useState(() => getStoredSetting('preferredLanguage', 'ru'))
+  const [systemPrompt, setSystemPrompt] = useState(() => getStoredSetting('systemPrompt', ''))
+  
+  const [sessionId, setSessionId] = useState(null)
+  const [sessions, setSessions] = useState([])
+  const messagesEndRef = useRef(null)
+  const textareaRef = useRef(null)
+  const abortControllerRef = useRef(null)
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+  }
+
+  useEffect(() => {
+    scrollToBottom()
+  }, [messages])
+
+  // Auto-resize textarea
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto'
+      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 200)}px`
+    }
+  }, [input])
+
+  // Загрузка списка сессий при старте
+  useEffect(() => {
+    fetchSessions()
+  }, [])
+
+  // Сохранение настроек в localStorage при изменении
+  useEffect(() => {
+    const settings = {
+      useRag,
+      historyLimit,
+      maxTokens,
+      temperature,
+      repeatPenalty,
+      preferredLanguage,
+      systemPrompt
+    }
+    localStorage.setItem('ai-chat-settings', JSON.stringify(settings))
+  }, [useRag, historyLimit, maxTokens, temperature, repeatPenalty, preferredLanguage, systemPrompt])
+
+  const fetchSessions = async () => {
+    try {
+      const res = await fetch('http://localhost:8000/api/sessions')
+      if (res.ok) {
+        const data = await res.json()
+        setSessions(data)
+      }
+    } catch (e) {
+      console.error("Failed to fetch sessions", e)
+    }
+  }
+
+  const deleteSession = async (e, id) => {
+    e.stopPropagation() // Prevent loading the session when clicking delete
+    if (!confirm('Are you sure you want to delete this chat?')) return
+
+    try {
+      const res = await fetch(`http://localhost:8000/api/history/${id}`, {
+        method: 'DELETE'
+      })
+      
+      if (res.ok) {
+        // If we deleted the current session, start a new one
+        if (id === sessionId) {
+          startNewChat()
+        }
+        fetchSessions()
+      }
+    } catch (e) {
+      console.error("Failed to delete session", e)
+    }
+  }
+
+  const loadSession = async (id) => {
+    if (id === sessionId) return
+    setIsLoading(true)
+    try {
+      const res = await fetch(`http://localhost:8000/api/history/${id}`)
+      if (res.ok) {
+        const history = await res.json()
+        setMessages(history.length ? history : [])
+        setSessionId(id)
+      }
+    } catch (e) {
+      console.error("Failed to load session", e)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const startNewChat = () => {
+    setSessionId(null)
+    setMessages([{ role: 'assistant', content: 'Привет! Я ваш AI-помощник. Чем могу помочь с кодом сегодня?' }])
+  }
+
+  const stopGeneration = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort()
+      abortControllerRef.current = null
+      setIsLoading(false)
+    }
+  }
+
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+    if (!input.trim() || isLoading) return
+
+    const userMessage = { role: 'user', content: input }
+    setMessages(prev => [...prev, userMessage])
+    setInput('')
+    setIsLoading(true)
+
+    // Create new AbortController
+    abortControllerRef.current = new AbortController()
+
+    // Формируем системный промпт с учетом языка
+    let finalSystemPrompt = systemPrompt
+    if (!systemPrompt.trim()) {
+      const languageInstructions = {
+        'ru': 'Always respond in Russian language.',
+        'en': 'Always respond in English language.',
+        'zh': 'Always respond in Chinese language.',
+        'es': 'Always respond in Spanish language.',
+        'auto': ''
+      }
+      finalSystemPrompt = languageInstructions[preferredLanguage] || ''
+    }
+
+    // Создаем пустое сообщение-заглушку для streaming
+    const streamingMessageIndex = messages.length + 1
+    setMessages(prev => [...prev, { role: 'assistant', content: '', streaming: true }])
+
+    try {
+      const response = await fetch('http://localhost:8000/api/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          prompt: userMessage.content,
+          use_rag: useRag,
+          history_limit: historyLimit,
+          max_tokens: maxTokens,
+          temperature: temperature,
+          repeat_penalty: repeatPenalty,
+          system_prompt: finalSystemPrompt,
+          session_id: sessionId
+        }),
+        signal: abortControllerRef.current.signal
+      })
+
+      if (!response.ok) throw new Error('Network response was not ok')
+
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let fullContent = ''
+      let metadata = {}
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        const chunk = decoder.decode(value, { stream: true })
+        const lines = chunk.split('\n')
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(line.slice(6))
+              
+              if (data.type === 'metadata') {
+                metadata = data
+                if (!sessionId && data.session_id) {
+                  setSessionId(data.session_id)
+                  fetchSessions()
+                }
+              } else if (data.type === 'content') {
+                fullContent += data.content
+                // Обновляем сообщение с накопленным контентом
+                setMessages(prev => {
+                  const newMessages = [...prev]
+                  newMessages[streamingMessageIndex] = {
+                    role: 'assistant',
+                    content: fullContent,
+                    streaming: true,
+                    meta: {
+                      category: metadata.category,
+                      rag_used: metadata.rag_used,
+                      model: metadata.model
+                    }
+                  }
+                  return newMessages
+                })
+              } else if (data.type === 'done') {
+                // Завершаем streaming
+                setMessages(prev => {
+                  const newMessages = [...prev]
+                  delete newMessages[streamingMessageIndex].streaming
+                  return newMessages
+                })
+                if (sessionId) fetchSessions()
+              }
+            } catch (e) {
+              console.error('Failed to parse SSE data:', e)
+            }
+          }
+        }
+      }
+
+    } catch (error) {
+      if (error.name === 'AbortError') {
+        console.log('Generation stopped by user')
+        setMessages(prev => [...prev, { 
+          role: 'assistant', 
+          content: 'Generation stopped.' 
+        }])
+      } else {
+        console.error('Error:', error)
+        setMessages(prev => [...prev, { 
+          role: 'assistant', 
+          content: 'Извините, произошла ошибка при соединении с сервером.' 
+        }])
+      }
+    } finally {
+      setIsLoading(false)
+      abortControllerRef.current = null
+    }
+  }
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      handleSubmit(e)
+    }
+  }
+
+  return (
+    <div className="app-container">
+      {/* Sidebar */}
+      <div className="sidebar">
+        <div className="new-chat-btn" onClick={startNewChat}>
+          <Plus size={16} />
+          <span>New Chat</span>
+        </div>
+        <div className="history">
+          {sessions.map(session => (
+            <div 
+              key={session.id} 
+              className={`history-item ${sessionId === session.id ? 'active' : ''}`}
+              onClick={() => loadSession(session.id)}
+            >
+              <MessageSquare size={14} />
+              <span className="history-title">{session.title || "New Chat"}</span>
+              <button 
+                className="delete-chat-btn"
+                onClick={(e) => deleteSession(e, session.id)}
+                title="Delete chat"
+              >
+                <Trash2 size={14} />
+              </button>
+            </div>
+          ))}
+        </div>
+        <div className="sidebar-footer">
+          <button className="settings-btn" onClick={() => setIsSettingsOpen(true)}>
+            <Settings size={16} />
+            <span>Settings</span>
+          </button>
+          <SystemMonitor />
+        </div>
+      </div>
+
+      <SettingsModal 
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+        useRag={useRag} setUseRag={setUseRag}
+        historyLimit={historyLimit} setHistoryLimit={setHistoryLimit}
+        maxTokens={maxTokens} setMaxTokens={setMaxTokens}
+        temperature={temperature} setTemperature={setTemperature}
+        repeatPenalty={repeatPenalty} setRepeatPenalty={setRepeatPenalty}
+        preferredLanguage={preferredLanguage} setPreferredLanguage={setPreferredLanguage}
+        systemPrompt={systemPrompt} setSystemPrompt={setSystemPrompt}
+      />
+
+      {/* Main Chat Area */}
+      <div className="chat-area">
+        <div className="messages-container">
+          {messages.map((msg, index) => (
+            <div key={index} className={`message-wrapper ${msg.role}`}>
+              <div className="message-content">
+                <div className="avatar">
+                  {msg.role === 'assistant' ? <Bot size={24} /> : <User size={24} />}
+                </div>
+                <div className="text-content">
+                  <div className="sender-name">
+                    {msg.role === 'assistant' ? 'AI Assistant' : 'You'}
+                    {msg.meta && (
+                      <span className="meta-badge">
+                        {msg.meta.model || msg.meta.category} {msg.meta.rag_used ? '(RAG)' : ''}
+                      </span>
+                    )}
+                  </div>
+                  {msg.role === 'assistant' ? (
+                    <MessageContent content={msg.content} />
+                  ) : (
+                    <div className="markdown">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        {msg.content}
+                      </ReactMarkdown>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          ))}
+          {isLoading && (
+            <div className="message-wrapper assistant">
+              <div className="message-content">
+                <div className="avatar"><Bot size={24} /></div>
+                <div className="text-content">
+                  <div className="loading-indicator">
+                    <Loader2 className="spin" size={20} />
+                    <span>Thinking...</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+          <div ref={messagesEndRef} />
+        </div>
+
+        {/* Input Area */}
+        <div className="input-area">
+          <div className="input-container">
+            <form onSubmit={handleSubmit}>
+              <div className="input-wrapper">
+                <button type="button" className="attach-btn">
+                  <Paperclip size={20} />
+                </button>
+                <textarea
+                  ref={textareaRef}
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder="Message AI..."
+                  disabled={isLoading}
+                  rows={1}
+                />
+                {isLoading ? (
+                  <button 
+                    type="button" 
+                    className="stop-btn"
+                    onClick={stopGeneration}
+                  >
+                    <Square size={14} fill="currentColor" />
+                  </button>
+                ) : (
+                  <button 
+                    type="submit" 
+                    className={`send-btn ${input.trim() ? 'active' : ''}`}
+                    disabled={!input.trim()}
+                  >
+                    <Send size={18} />
+                  </button>
+                )}
+              </div>
+            </form>
+            <div className="disclaimer">
+              AI can make mistakes. Consider checking important information.
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+export default App

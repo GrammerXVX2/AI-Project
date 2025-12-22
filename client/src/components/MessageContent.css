@@ -1,0 +1,44 @@
+.think-block {
+  margin-bottom: 1rem;
+  border-left: 2px solid #444;
+  background-color: rgba(255, 255, 255, 0.03);
+  border-radius: 0 4px 4px 0;
+  overflow: hidden;
+}
+
+.think-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.8rem;
+  cursor: pointer;
+  font-size: 0.75rem;
+  color: #888;
+  user-select: none;
+  transition: color 0.2s;
+}
+
+.think-header:hover {
+  color: #ccc;
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
+.think-content {
+  padding: 0.5rem 1rem;
+  font-size: 0.85rem;
+  color: #aaa;
+  font-style: italic;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.think-content p {
+  margin: 0.5rem 0;
+}
+
+.think-content p:first-child {
+  margin-top: 0;
+}
+
+.think-content p:last-child {
+  margin-bottom: 0;
+}

@@ -1,0 +1,77 @@
+# Python virtual environment
+venv/
+env/
+ENV/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environment
+Include/
+Lib/
+Scripts/
+pyvenv.cfg
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Environment variables
+.env
+.env.local
+
+# Logs
+*.log
+
+# Database/Cache
+*.db
+*.sqlite
+*.sqlite3
+__pycache__/
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Project specific
+rag_db/
+chats/
+models/
+RAG data/
+TEST_response_AI/
+*.json
+*.pkl
+*.pickle
+*.pt
+*.pth
+*.safetensors
+
+# Misc
+.cache/
+node_modules/
