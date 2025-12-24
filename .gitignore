@@ -31,8 +31,10 @@ MANIFEST
 # Virtual environment
 Include/
 Lib/
+Library/
 Scripts/
 pyvenv.cfg
+share/
 
 # IDE
 .vscode/
