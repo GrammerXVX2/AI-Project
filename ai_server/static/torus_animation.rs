@@ -1,14 +1,14 @@
 use crossterm::{
-    event::{KeyCode, KeyEvent, Event},
+    cursor::{Hide, MoveTo, Show},
+    event::{Event, KeyCode, KeyEvent},
     execute,
-    terminal::{EnterAlternateScreen, LeaveAlternateScreen, Clear, ClearType, size},
-    cursor::{MoveTo, Hide, Show},
+    terminal::{size, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use std::time::{Duration, Instant};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::thread;
 use std::io::Result;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::thread;
+use std::time::{Duration, Instant};
 
 fn clear_screen() -> Result<()> {
     execute!(std::io::stdout(), Clear(ClearType::All))
@@ -19,16 +19,16 @@ fn draw_torus(rotations: f64, width: usize, height: usize) -> String {
     let mut output = vec![' '; width * height];
     let mut zbuffer = vec![0.0f64; width * height];
 
-    let a = rotations;       // Вращение вокруг оси X
+    let a = rotations; // Вращение вокруг оси X
     let b = rotations * 0.5; // Вращение вокруг оси Z
 
     let r1 = 1.0; // Радиус трубы
     let r2 = 2.0; // Радиус от центра до трубы
-    
+
     // ИСПРАВЛЕНО: Увеличено расстояние (K2) с 5.0 до 15.0, чтобы избежать обрезания (clipping)
     // при вращении, когда часть тора подходит слишком близко к "камере".
-    let k2 = 15.0; 
-    
+    let k2 = 15.0;
+
     // ИСПРАВЛЕНО: Расчет масштаба (K1) теперь учитывает и высоту терминала.
     // Символ в консоли обычно в 2 раза выше, чем шире, поэтому умножаем height на 2.
     // Берем минимум, чтобы пончик вписывался и по ширине, и по высоте.
@@ -55,8 +55,10 @@ fn draw_torus(rotations: f64, width: usize, height: usize) -> String {
             let circle_y = r1 * sin_theta;
 
             // 3D координаты после вращения
-            let x = circle_x * (cos_b * cos_phi + sin_a * sin_b * sin_phi) - circle_y * cos_a * sin_b;
-            let y = circle_x * (sin_b * cos_phi - sin_a * cos_b * sin_phi) + circle_y * cos_a * cos_b;
+            let x =
+                circle_x * (cos_b * cos_phi + sin_a * sin_b * sin_phi) - circle_y * cos_a * sin_b;
+            let y =
+                circle_x * (sin_b * cos_phi - sin_a * cos_b * sin_phi) + circle_y * cos_a * cos_b;
             let z = k2 + cos_a * circle_x * sin_phi + circle_y * sin_a;
             let ooz = 1.0 / z; // One over Z
 
@@ -67,7 +69,8 @@ fn draw_torus(rotations: f64, width: usize, height: usize) -> String {
             let yp = (height as f64 / 2.0 - k1 * ooz * y) as i32; // Минус, так как Y в консоли идет вниз
 
             // Расчет освещенности (Luminance)
-            let l = cos_phi * cos_theta * sin_b - cos_a * cos_theta * sin_phi - sin_a * sin_theta + cos_b * (cos_a * sin_theta - cos_theta * sin_a * sin_phi);
+            let l = cos_phi * cos_theta * sin_b - cos_a * cos_theta * sin_phi - sin_a * sin_theta
+                + cos_b * (cos_a * sin_theta - cos_theta * sin_a * sin_phi);
 
             if l > 0.0 {
                 if xp >= 0 && xp < width as i32 && yp >= 0 && yp < height as i32 {
@@ -111,7 +114,7 @@ fn main() -> Result<()> {
 
         while running_clone.load(Ordering::Relaxed) {
             let rotations = start_time.elapsed().as_secs_f64();
-            
+
             // ИСПРАВЛЕНО: Получаем реальный размер терминала.
             // Если не удается получить, используем дефолтный 80x24.
             let (cols, rows) = size().unwrap_or((125, 24));
@@ -122,7 +125,7 @@ fn main() -> Result<()> {
             // мы просто перемещаем курсор в начало (0, 0) и перезаписываем кадр.
             // Это стандартная техника для консольной анимации (double buffering emulation).
             execute!(std::io::stdout(), MoveTo(0, 0)).unwrap();
-            
+
             let animation = draw_torus(rotations, width, height);
             // Используем print! вместо println!, чтобы избежать лишнего перевода строки в конце,
             // который может вызвать скроллинг экрана.
@@ -136,9 +139,9 @@ fn main() -> Result<()> {
     loop {
         if crossterm::event::poll(Duration::from_millis(100))? {
             if let Event::Key(KeyEvent {
-                code: KeyCode::Esc,
-                ..
-            }) = crossterm::event::read()? {
+                code: KeyCode::Esc, ..
+            }) = crossterm::event::read()?
+            {
                 running.store(false, Ordering::Relaxed);
                 break;
             }

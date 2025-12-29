@@ -39,6 +39,44 @@ def _looks_like_code_intent(text: str) -> bool:
     return any(cue in lower for cue in cues)
 
 
+def _needs_mermaid_guardrail(text: str) -> bool:
+    if not text:
+        return False
+    lower = text.lower()
+    keywords = [
+        "mermaid",
+        "диаграм",
+        "diagram",
+        "sequence diagram",
+        "class diagram",
+        "er diagram",
+        "erd",
+        "flowchart",
+        "блок-схема",
+        "сделай диаграмму",
+    ]
+    return any(k in lower for k in keywords)
+
+
+def _guess_mermaid_type(text: str) -> str:
+    lower = text.lower()
+    if "er " in lower or "erdiagram" in lower or "entity" in lower or "erd" in lower:
+        return "erDiagram"
+    if "sequence" in lower or "последователь" in lower:
+        return "sequenceDiagram"
+    if "class" in lower or "класс" in lower:
+        return "classDiagram"
+    if "state" in lower or "состояни" in lower:
+        return "stateDiagram"
+    if "gantt" in lower or "график" in lower:
+        return "gantt"
+    if "journey" in lower:
+        return "journey"
+    if "git" in lower:
+        return "gitGraph"
+    return "graph TD"
+
+
 async def orchestrate_route(user_query: str, context_window):
     """Lightweight orchestrator: ask small model for JSON route + confidence.
 
@@ -205,6 +243,15 @@ async def process_chat(request: UserRequest):
         rag_context = await rag_service.asearch(user_query)
 
     # Select Agent
+    mermaid_hint = None
+    if _needs_mermaid_guardrail(user_query):
+        mermaid_type = _guess_mermaid_type(user_query)
+        mermaid_hint = (
+            "Если отвечаешь Mermaid-диаграммой: используй тип "
+            f"{mermaid_type}. Оборачивай единственный блок в ```mermaid ...```.
+Не используй несуществующие типы (например erdiag), избегай нестандартных style.
+Поддерживаемые типы: graph, sequenceDiagram, classDiagram, stateDiagram, erDiagram, gantt, journey, gitGraph.")
+
     if request.system_prompt and request.system_prompt.strip():
         system_msg = request.system_prompt
         target_agent = CODER_MODEL if decision == "CODING" else CHATTER_MODEL
@@ -215,6 +262,9 @@ async def process_chat(request: UserRequest):
         if decision == "CODING":
             target_agent = CODER_MODEL
             system_msg = "You are an expert coding assistant and knowledge base expert."
+
+    if mermaid_hint:
+        system_msg = f"{system_msg}\n\n{mermaid_hint}"
 
     # Fallback Logic
     agent_name = target_agent

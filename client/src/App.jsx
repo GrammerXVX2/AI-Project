@@ -476,7 +476,7 @@ function App() {
                       </div>
                     ) : (
                       <>
-                        <MessageContent content={msg.content} />
+                        <MessageContent content={msg.content} streaming={!!msg.streaming} />
                         {msg.meta && msg.meta.image_url && (
                           <div className="image-actions">
                             <button className="image-btn disabled" disabled>

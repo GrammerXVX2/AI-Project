@@ -42,3 +42,127 @@
 .think-content p:last-child {
   margin-bottom: 0;
 }
+
+.mermaid-wrapper {
+  margin: 0.75rem 0;
+  padding: 0.75rem;
+  background: #0b1220;
+  border: 1px solid #1e293b;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.mermaid-wrapper svg {
+  width: auto;
+  height: auto;
+  max-width: none;
+  display: block;
+}
+
+.mermaid-panzoom-inner svg {
+  shape-rendering: geometricPrecision;
+  text-rendering: optimizeLegibility;
+}
+
+.mermaid-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+  font-size: 0.85rem;
+  color: #cbd5e1;
+}
+
+.mermaid-toolbar button {
+  background: #1f2937;
+  border: 1px solid #334155;
+  color: #e2e8f0;
+  border-radius: 6px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+.mermaid-toolbar button:hover {
+  border-color: #475569;
+}
+
+.mermaid-toolbar .hint {
+  opacity: 0.8;
+}
+
+.mermaid-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+  flex-wrap: wrap;
+  font-size: 0.85rem;
+}
+
+.mermaid-actions button {
+  background: #1f2937;
+  border: 1px solid #334155;
+  color: #e2e8f0;
+  border-radius: 6px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+.mermaid-actions button:hover {
+  border-color: #475569;
+}
+
+.mermaid-caption {
+  color: #94a3b8;
+  opacity: 0.9;
+}
+
+.mermaid-panzoom {
+  position: relative;
+  width: 100%;
+  min-height: 200px;
+  background: #0b1220;
+  border: 1px dashed #1e293b;
+  overflow: hidden;
+  cursor: grab;
+  overscroll-behavior: contain;
+  touch-action: none;
+  user-select: none;
+}
+
+.mermaid-panzoom:active {
+  cursor: grabbing;
+}
+
+.mermaid-panzoom-inner {
+  transform-origin: 0 0;
+  will-change: transform;
+}
+
+.mermaid-error {
+  margin-top: 0.5rem;
+  color: #f87171;
+  font-size: 0.85rem;
+}
+
+.mermaid-error-box {
+  background: #1a0f12;
+  border-color: #7f1d1d;
+}
+
+.mermaid-error-title {
+  color: #fca5a5;
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+}
+
+.mermaid-error-message {
+  color: #fda4af;
+  font-size: 0.9rem;
+}
+
+.mermaid-error-details summary {
+  cursor: pointer;
+  color: #e5e7eb;
+  margin-top: 0.5rem;
+}
