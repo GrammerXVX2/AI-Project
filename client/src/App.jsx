@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { Send, Bot, User, Loader2, Paperclip, MessageSquare, Plus, Square, Trash2, Settings } from 'lucide-react'
+import { Send, Bot, User, Loader2, Paperclip, MessageSquare, Plus, Square, Trash2, Settings, PanelLeftClose, PanelLeftOpen, Image as ImageIcon } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { SystemMonitor } from './components/SystemMonitor'
@@ -14,6 +14,17 @@ function App() {
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true)
+  const [mode, setMode] = useState('chat') // 'chat' | 'image'
+  const [imgParams, setImgParams] = useState({
+    width: 1024,
+    height: 1024,
+    steps: 9,
+    seed: 42,
+    enhance_prompt: true,
+    low_vram: false,
+    offload_cpu: true
+  })
   
   // Helper for lazy state initialization
   const getStoredSetting = (key, defaultValue) => {
@@ -37,12 +48,21 @@ function App() {
   const [repeatPenalty, setRepeatPenalty] = useState(() => getStoredSetting('repeatPenalty', 1.1))
   const [preferredLanguage, setPreferredLanguage] = useState(() => getStoredSetting('preferredLanguage', 'ru'))
   const [systemPrompt, setSystemPrompt] = useState(() => getStoredSetting('systemPrompt', ''))
+  const [adminKey, setAdminKey] = useState(() => getStoredSetting('adminKey', ''))
+  const [mySessionIds, setMySessionIds] = useState(() => {
+    try {
+      const saved = localStorage.getItem('my-session-ids')
+      return saved ? JSON.parse(saved) : []
+    } catch { return [] }
+  })
   
   const [sessionId, setSessionId] = useState(null)
   const [sessions, setSessions] = useState([])
   const messagesEndRef = useRef(null)
   const textareaRef = useRef(null)
   const abortControllerRef = useRef(null)
+  const progressIntervalRef = useRef(null)
+  const [imageProgress, setImageProgress] = useState(null)
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -60,6 +80,8 @@ function App() {
     }
   }, [input])
 
+  // We no longer poll fine-grained progress to avoid noisy logs.
+
   // Загрузка списка сессий при старте
   useEffect(() => {
     fetchSessions()
@@ -74,17 +96,25 @@ function App() {
       temperature,
       repeatPenalty,
       preferredLanguage,
-      systemPrompt
+      systemPrompt,
+      adminKey
     }
     localStorage.setItem('ai-chat-settings', JSON.stringify(settings))
-  }, [useRag, historyLimit, maxTokens, temperature, repeatPenalty, preferredLanguage, systemPrompt])
+  }, [useRag, historyLimit, maxTokens, temperature, repeatPenalty, preferredLanguage, systemPrompt, adminKey])
+
+  // Save mySessionIds
+  useEffect(() => {
+    localStorage.setItem('my-session-ids', JSON.stringify(mySessionIds))
+  }, [mySessionIds])
 
   const fetchSessions = async () => {
     try {
       const res = await fetch('http://localhost:8000/api/sessions')
       if (res.ok) {
         const data = await res.json()
-        setSessions(data)
+        // Filter sessions to only show ones created by this client
+        const mySessions = data.filter(s => mySessionIds.includes(s.id))
+        setSessions(mySessions)
       }
     } catch (e) {
       console.error("Failed to fetch sessions", e)
@@ -105,6 +135,8 @@ function App() {
         if (id === sessionId) {
           startNewChat()
         }
+        // Remove from local list
+        setMySessionIds(prev => prev.filter(sid => sid !== id))
         fetchSessions()
       }
     } catch (e) {
@@ -150,6 +182,82 @@ function App() {
     setMessages(prev => [...prev, userMessage])
     setInput('')
     setIsLoading(true)
+
+    if (mode === 'image') {
+      try {
+        setMessages(prev => [...prev, { role: 'assistant', content: 'Generating image...', streaming: true, meta: { image_pending: true } }])
+
+        const reqSessionId = sessionId || (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2))
+        if (!sessionId) {
+          setSessionId(reqSessionId)
+          setMySessionIds(prev => {
+            if (!prev.includes(reqSessionId)) {
+              return [reqSessionId, ...prev]
+            }
+            return prev
+          })
+        }
+        
+        // No progress polling to reduce spam in logs; rely on placeholder spinner.
+
+        const res = await fetch('http://localhost:8000/api/image/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            prompt: userMessage.content,
+            session_id: reqSessionId,
+            ...imgParams
+          })
+        })
+        
+        if (!res.ok) throw new Error('Image generation failed')
+        
+        const data = await res.json()
+
+        if (data.session_id && !sessionId) {
+          setSessionId(data.session_id)
+          setMySessionIds(prev => {
+            if (!prev.includes(data.session_id)) {
+              return [data.session_id, ...prev]
+            }
+            return prev
+          })
+        }
+        
+        setMessages(prev => {
+          const newMessages = [...prev]
+          let imageUrl = data.image_file || data.image
+          const duration = data.duration
+          if (imageUrl && imageUrl.startsWith('/')) {
+            imageUrl = `http://localhost:8000${imageUrl}`
+          }
+          newMessages[newMessages.length - 1] = {
+            role: 'assistant',
+            content: `![Generated Image](${imageUrl})\n\n*Prompt: ${data.prompt_used}*`,
+            meta: { model: 'Z-Image-Turbo', image_url: imageUrl, duration }
+          }
+          return newMessages
+        })
+        setImageProgress(null)
+      } catch (e) {
+        console.error(e)
+        setMessages(prev => {
+          const newMessages = [...prev]
+          newMessages[newMessages.length - 1] = {
+            role: 'assistant',
+            content: `Error generating image: ${e.message}`
+          }
+          return newMessages
+        })
+      } finally {
+        setIsLoading(false)
+        if (progressIntervalRef.current) {
+          clearInterval(progressIntervalRef.current)
+          progressIntervalRef.current = null
+        }
+      }
+      return
+    }
 
     // Create new AbortController
     abortControllerRef.current = new AbortController()
@@ -213,6 +321,13 @@ function App() {
                 metadata = data
                 if (!sessionId && data.session_id) {
                   setSessionId(data.session_id)
+                  // Add new session ID to our local list
+                  setMySessionIds(prev => {
+                    if (!prev.includes(data.session_id)) {
+                      return [data.session_id, ...prev]
+                    }
+                    return prev
+                  })
                   fetchSessions()
                 }
               } else if (data.type === 'content') {
@@ -278,7 +393,7 @@ function App() {
   return (
     <div className="app-container">
       {/* Sidebar */}
-      <div className="sidebar">
+      <div className={`sidebar ${!isSidebarOpen ? 'collapsed' : ''}`}>
         <div className="new-chat-btn" onClick={startNewChat}>
           <Plus size={16} />
           <span>New Chat</span>
@@ -307,7 +422,7 @@ function App() {
             <Settings size={16} />
             <span>Settings</span>
           </button>
-          <SystemMonitor />
+          <SystemMonitor adminKey={adminKey} />
         </div>
       </div>
 
@@ -321,10 +436,20 @@ function App() {
         repeatPenalty={repeatPenalty} setRepeatPenalty={setRepeatPenalty}
         preferredLanguage={preferredLanguage} setPreferredLanguage={setPreferredLanguage}
         systemPrompt={systemPrompt} setSystemPrompt={setSystemPrompt}
+        adminKey={adminKey} setAdminKey={setAdminKey}
       />
 
       {/* Main Chat Area */}
       <div className="chat-area">
+        <div className="chat-header">
+          <button 
+            className="sidebar-toggle" 
+            onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+            title={isSidebarOpen ? "Close Sidebar" : "Open Sidebar"}
+          >
+            {isSidebarOpen ? <PanelLeftClose size={20} /> : <PanelLeftOpen size={20} />}
+          </button>
+        </div>
         <div className="messages-container">
           {messages.map((msg, index) => (
             <div key={index} className={`message-wrapper ${msg.role}`}>
@@ -336,13 +461,34 @@ function App() {
                   <div className="sender-name">
                     {msg.role === 'assistant' ? 'AI Assistant' : 'You'}
                     {msg.meta && (
-                      <span className="meta-badge">
-                        {msg.meta.model || msg.meta.category} {msg.meta.rag_used ? '(RAG)' : ''}
-                      </span>
-                    )}
+                        <span className="meta-badge">
+                          {msg.meta.model || msg.meta.category}
+                          {msg.meta.duration ? ` · ${Math.round(msg.meta.duration * 10) / 10}s` : ''}
+                          {msg.meta.rag_used ? ' (RAG)' : ''}
+                        </span>
+                      )}
                   </div>
                   {msg.role === 'assistant' ? (
-                    <MessageContent content={msg.content} />
+                    msg.meta && msg.meta.image_pending ? (
+                      <div className="image-placeholder">
+                        <Loader2 className="spin" size={24} />
+                        <span>Generating image...</span>
+                      </div>
+                    ) : (
+                      <>
+                        <MessageContent content={msg.content} />
+                        {msg.meta && msg.meta.image_url && (
+                          <div className="image-actions">
+                            <button className="image-btn disabled" disabled>
+                              Copy URL
+                            </button>
+                            <a className="image-btn" href={msg.meta.image_url} download target="_blank" rel="noreferrer">
+                              Download
+                            </a>
+                          </div>
+                        )}
+                      </>
+                    )
                   ) : (
                     <div className="markdown">
                       <ReactMarkdown remarkPlugins={[remarkGfm]}>
@@ -354,7 +500,7 @@ function App() {
               </div>
             </div>
           ))}
-          {isLoading && (
+          {isLoading && mode === 'chat' && (
             <div className="message-wrapper assistant">
               <div className="message-content">
                 <div className="avatar"><Bot size={24} /></div>
@@ -373,6 +519,82 @@ function App() {
         {/* Input Area */}
         <div className="input-area">
           <div className="input-container">
+            <div className="mode-switcher">
+              <button 
+                className={`mode-btn ${mode === 'chat' ? 'active' : ''}`}
+                onClick={() => setMode('chat')}
+              >
+                <MessageSquare size={16} /> Chat
+              </button>
+              <button 
+                className={`mode-btn ${mode === 'image' ? 'active' : ''}`}
+                onClick={() => setMode('image')}
+              >
+                <ImageIcon size={16} /> Image
+              </button>
+            </div>
+
+            {mode === 'image' && (
+              <div className="image-params">
+                <div className="param-group">
+                  <label>Size</label>
+                  <select 
+                    value={`${imgParams.width}x${imgParams.height}`}
+                    onChange={(e) => {
+                      const [w, h] = e.target.value.split('x').map(Number)
+                      setImgParams(p => ({...p, width: w, height: h}))
+                    }}
+                  >
+                    <option value="512x512">512x512</option>
+                    <option value="768x768">768x768</option>
+                    <option value="1024x1024">1024x1024</option>
+                    <option value="1280x720">1280x720 (16:9)</option>
+                  </select>
+                </div>
+                <div className="param-group">
+                  <label>Steps</label>
+                  <input 
+                    type="number" 
+                    min="1" max="50" 
+                    value={imgParams.steps}
+                    onChange={(e) => setImgParams(p => ({...p, steps: parseInt(e.target.value)}))}
+                  />
+                </div>
+                <div className="param-group">
+                  <label>Seed</label>
+                  <input 
+                    type="number" 
+                    value={imgParams.seed}
+                    onChange={(e) => setImgParams(p => ({...p, seed: parseInt(e.target.value)}))}
+                  />
+                </div>
+                <label className="checkbox-param">
+                  <input 
+                    type="checkbox"
+                    checked={imgParams.enhance_prompt}
+                    onChange={(e) => setImgParams(p => ({...p, enhance_prompt: e.target.checked}))}
+                  />
+                  Enhance
+                </label>
+                <label className="checkbox-param">
+                  <input 
+                    type="checkbox"
+                    checked={imgParams.low_vram}
+                    onChange={(e) => setImgParams(p => ({...p, low_vram: e.target.checked}))}
+                  />
+                  Low VRAM
+                </label>
+                <label className="checkbox-param">
+                  <input 
+                    type="checkbox"
+                    checked={imgParams.offload_cpu}
+                    onChange={(e) => setImgParams(p => ({...p, offload_cpu: e.target.checked}))}
+                  />
+                  CPU Offload
+                </label>
+              </div>
+            )}
+
             <form onSubmit={handleSubmit}>
               <div className="input-wrapper">
                 <button type="button" className="attach-btn">

@@ -3,9 +3,11 @@ from contextlib import asynccontextmanager
 
 import uvicorn
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 
-from ai_server.app.api import chat, models, system
+from ai_server.app.api import chat, models, system, image
+from ai_server.app.config import STATIC_DIR
 from ai_server.app.services.model_manager import model_manager
 
 
@@ -40,6 +42,10 @@ app.add_middleware(
 app.include_router(chat.router)
 app.include_router(models.router)
 app.include_router(system.router)
+app.include_router(image.router)
+
+# Serve static files (generated images, etc.)
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
 @app.get("/")

@@ -260,9 +260,12 @@ async def process_chat(request: UserRequest):
 
         # Cap max_tokens to model context to avoid overrun errors.
         ctx_limit = getattr(agent, "n_ctx", None)
+        if callable(ctx_limit):
+            ctx_limit = ctx_limit()
+
         safe_max_tokens = request.max_tokens
-        if ctx_limit:
-            safe_max_tokens = min(safe_max_tokens, max(256, ctx_limit // 2))
+        if isinstance(ctx_limit, int):
+            safe_max_tokens = min(safe_max_tokens, min(16384, ctx_limit // 2))
 
         yield f"data: {json.dumps({'type': 'metadata', 'category': decision, 'rag_used': bool(rag_context), 'model': agent_name, 'session_id': current_session_id})}\n\n"
 

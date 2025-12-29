@@ -68,6 +68,7 @@ models/
 TEST_response_AI/
 # RAG data/ - uncomment to ignore large datasets
 *.json
+!package.json
 *.pkl
 *.pickle
 *.pt

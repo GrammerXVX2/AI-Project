@@ -11,7 +11,8 @@ export function SettingsModal({
   temperature, setTemperature,
   repeatPenalty, setRepeatPenalty,
   preferredLanguage, setPreferredLanguage,
-  systemPrompt, setSystemPrompt
+  systemPrompt, setSystemPrompt,
+  adminKey, setAdminKey
 }) {
   if (!isOpen) return null
 
@@ -94,6 +95,18 @@ export function SettingsModal({
               value={repeatPenalty} 
               onChange={(e) => setRepeatPenalty(parseFloat(e.target.value))} 
             />
+          </div>
+
+          <div className="setting-group">
+            <label>Admin Secret Key</label>
+            <input 
+              type="password" 
+              className="text-input"
+              value={adminKey || ''} 
+              onChange={(e) => setAdminKey(e.target.value)} 
+              placeholder="Enter secret key for model control"
+            />
+            <p className="setting-desc">Required to load/unload models.</p>
           </div>
 
           <div className="setting-group">
