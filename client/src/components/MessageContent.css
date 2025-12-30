@@ -52,6 +52,52 @@
   overflow: hidden;
 }
 
+.mermaid-admin-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+  font-size: 0.85rem;
+  color: #cbd5e1;
+}
+
+.mermaid-admin-left {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.mermaid-admin-bar button {
+  background: #1f2937;
+  border: 1px solid #334155;
+  color: #e2e8f0;
+  border-radius: 6px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+.mermaid-admin-bar button:hover {
+  border-color: #475569;
+}
+
+.mermaid-code-editor {
+  margin-bottom: 0.5rem;
+}
+
+.mermaid-code-textarea {
+  width: 100%;
+  min-height: 140px;
+  background: #0f172a;
+  color: #e2e8f0;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  padding: 0.6rem 0.7rem;
+  font-family: ui-monospace, SFMono-Regular, SFMono, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 0.9rem;
+  resize: vertical;
+}
+
 .mermaid-wrapper svg {
   width: auto;
   height: auto;

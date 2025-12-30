@@ -21,6 +21,12 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"[ERROR] Failed to load orchestrator on startup: {e}")
 
+    # Load Summarizer and keep it resident
+    try:
+        await asyncio.to_thread(model_manager.load_model, "Summarizer")
+    except Exception as e:
+        print(f"[ERROR] Failed to load summarizer on startup: {e}")
+
     yield
 
     # Shutdown

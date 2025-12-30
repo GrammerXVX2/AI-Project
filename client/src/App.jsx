@@ -58,6 +58,9 @@ function App() {
   
   const [sessionId, setSessionId] = useState(null)
   const [sessions, setSessions] = useState([])
+  const [isSummaryOpen, setIsSummaryOpen] = useState(false)
+  const [summaries, setSummaries] = useState([])
+  const [expandedSummaries, setExpandedSummaries] = useState({})
   const messagesEndRef = useRef(null)
   const textareaRef = useRef(null)
   const abortControllerRef = useRef(null)
@@ -121,6 +124,28 @@ function App() {
     }
   }
 
+  const fetchSummaries = async () => {
+    try {
+      const res = await fetch('http://localhost:8000/api/sessions/summary')
+      if (res.ok) {
+        const data = await res.json()
+        setSummaries(data)
+      }
+    } catch (e) {
+      console.error('Failed to fetch summaries', e)
+    }
+  }
+
+  const toggleSummaryExpanded = (id) => {
+    setExpandedSummaries(prev => ({ ...prev, [id]: !prev[id] }))
+  }
+
+  const openSummaries = () => {
+    if (!adminKey) return
+    fetchSummaries()
+    setIsSummaryOpen(true)
+  }
+
   const deleteSession = async (e, id) => {
     e.stopPropagation() // Prevent loading the session when clicking delete
     if (!confirm('Are you sure you want to delete this chat?')) return
@@ -171,6 +196,20 @@ function App() {
       abortControllerRef.current.abort()
       abortControllerRef.current = null
       setIsLoading(false)
+    }
+  }
+
+  const handleMessageContentUpdate = async (messageIndex, newContent) => {
+    setMessages(prev => prev.map((m, idx) => idx === messageIndex ? { ...m, content: newContent } : m))
+    if (!sessionId) return
+    try {
+      await fetch(`http://localhost:8000/api/history/${sessionId}/message/${messageIndex}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: newContent })
+      })
+    } catch (e) {
+      console.error('Failed to persist message update', e)
     }
   }
 
@@ -422,6 +461,12 @@ function App() {
             <Settings size={16} />
             <span>Settings</span>
           </button>
+          {adminKey && (
+            <button className="settings-btn" onClick={openSummaries}>
+              <Settings size={16} />
+              <span>Summaries</span>
+            </button>
+          )}
           <SystemMonitor adminKey={adminKey} />
         </div>
       </div>
@@ -438,6 +483,46 @@ function App() {
         systemPrompt={systemPrompt} setSystemPrompt={setSystemPrompt}
         adminKey={adminKey} setAdminKey={setAdminKey}
       />
+
+      {isSummaryOpen && (
+        <div className="settings-modal-overlay" onClick={() => setIsSummaryOpen(false)}>
+          <div className="settings-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="settings-header">
+              <h2>Сводки чатов (admin)</h2>
+              <button className="close-btn" onClick={() => setIsSummaryOpen(false)}>✕</button>
+            </div>
+            <div className="settings-content">
+              {summaries.length === 0 && <div style={{ color: '#aaa' }}>Нет данных</div>}
+              {summaries.map(item => (
+                <div key={item.id} style={{ border: '1px solid #333', borderRadius: '6px', padding: '0.75rem', background: '#161616' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.5rem', marginBottom: '0.4rem' }}>
+                    <strong style={{ color: '#e5e7eb' }}>{item.title || 'Без названия'}</strong>
+                    <span style={{ color: '#888', fontSize: '0.8rem' }}>{item.date}</span>
+                  </div>
+                  {item.summary_checkpoints && item.summary_checkpoints.length > 0 && (
+                    <div style={{ color: '#94a3b8', fontSize: '0.8rem', marginBottom: '0.35rem' }}>
+                      Чекпоинтов: {item.summary_checkpoints.length}
+                    </div>
+                  )}
+                  <div style={{ color: '#cbd5e1', whiteSpace: 'pre-wrap' }}>
+                    {expandedSummaries[item.id]
+                      ? (item.summary || 'Нет выжимки')
+                      : ((item.summary || 'Нет выжимки').split(' ').slice(0, 10).join(' ') + ((item.summary || '').split(' ').length > 10 ? '…' : ''))}
+                  </div>
+                  {(item.summary || '').split(' ').length > 10 && (
+                    <button
+                      style={{ marginTop: '0.35rem', background: '#1f2937', border: '1px solid #334155', color: '#e2e8f0', borderRadius: '6px', padding: '4px 8px', cursor: 'pointer' }}
+                      onClick={() => toggleSummaryExpanded(item.id)}
+                    >
+                      {expandedSummaries[item.id] ? 'Свернуть' : 'Развернуть'}
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Main Chat Area */}
       <div className="chat-area">
@@ -476,7 +561,12 @@ function App() {
                       </div>
                     ) : (
                       <>
-                        <MessageContent content={msg.content} streaming={!!msg.streaming} />
+                        <MessageContent
+                          content={msg.content}
+                          streaming={!!msg.streaming}
+                          adminMode={!!adminKey}
+                          onContentUpdate={(updated) => handleMessageContentUpdate(index, updated)}
+                        />
                         {msg.meta && msg.meta.image_url && (
                           <div className="image-actions">
                             <button className="image-btn disabled" disabled>

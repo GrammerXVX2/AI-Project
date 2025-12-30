@@ -7,13 +7,22 @@ import './MessageContent.css'
 
 mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'dark' })
 
-function MermaidBlock({ chart }) {
+function MermaidBlock({ chart, adminMode = false, onCodeChange }) {
+  const [chartCode, setChartCode] = useState(chart)
+  const [draftCode, setDraftCode] = useState(chart)
+  const [showCode, setShowCode] = useState(false)
   const [svg, setSvg] = useState('')
   const [error, setError] = useState(null)
   const renderId = useRef(`mermaid-${Math.random().toString(36).slice(2)}`)
   const containerRef = useRef(null)
   const [viewBox, setViewBox] = useState(null)
   const baseBoxRef = useRef(null)
+
+  useEffect(() => {
+    setChartCode(chart)
+    setDraftCode(chart)
+    setShowCode(false)
+  }, [chart])
 
   useEffect(() => {
     let cancelled = false
@@ -37,9 +46,13 @@ function MermaidBlock({ chart }) {
     }
 
     const renderChart = async () => {
+      setError(null)
+      setSvg('')
+      setViewBox(null)
+      baseBoxRef.current = null
       try {
         // Validate syntax first to avoid rendering huge inline error SVGs
-        mermaid.parse(chart)
+        mermaid.parse(chartCode)
         // Render into a hidden offscreen container so Mermaid can measure layout safely
         let renderRoot = document.getElementById('mermaid-render-root')
         if (!renderRoot) {
@@ -56,7 +69,7 @@ function MermaidBlock({ chart }) {
         }
         renderRoot.innerHTML = ''
 
-        const { svg } = await mermaid.render(renderId.current, chart, renderRoot)
+        const { svg } = await mermaid.render(renderId.current, chartCode, renderRoot)
         renderRoot.innerHTML = ''
         // Mermaid returns an error SVG on failure; filter it out explicitly
         const looksLikeError = /Syntax error in text|Parse error|mermaid version/i.test(svg)
@@ -64,6 +77,8 @@ function MermaidBlock({ chart }) {
           if (looksLikeError) {
             setError('Mermaid render failed: invalid or unsupported syntax')
             setSvg('')
+            setViewBox(null)
+            baseBoxRef.current = null
             return
           } else {
             setSvg(svg)
@@ -76,6 +91,9 @@ function MermaidBlock({ chart }) {
       } catch (err) {
         if (!cancelled) {
           setError(err?.message || 'Failed to render diagram')
+          setSvg('')
+          setViewBox(null)
+          baseBoxRef.current = null
         }
       }
     }
@@ -85,7 +103,7 @@ function MermaidBlock({ chart }) {
     return () => {
       cancelled = true
     }
-  }, [chart])
+  }, [chartCode])
 
   useEffect(() => {
     if (!svg || !viewBox) return
@@ -157,23 +175,6 @@ function MermaidBlock({ chart }) {
     if (baseBoxRef.current) setViewBox(baseBoxRef.current)
   }
 
-  if (error) {
-    return (
-      <div className="mermaid-wrapper mermaid-error-box">
-        <div className="mermaid-error-title">Mermaid parse error</div>
-        <div className="mermaid-error-message">{error}</div>
-        <details className="mermaid-error-details">
-          <summary>Show source</summary>
-          <pre className="language-mermaid"><code>{chart}</code></pre>
-        </details>
-      </div>
-    )
-  }
-
-  if (!svg) {
-    return <div className="mermaid-wrapper">Rendering diagram...</div>
-  }
-
   const getCurrentSvgMarkup = () => {
     const svgEl = containerRef.current?.querySelector('svg')
     if (!svgEl) return svg
@@ -195,10 +196,23 @@ function MermaidBlock({ chart }) {
 
   const handleCopyCode = async () => {
     try {
-      await navigator.clipboard.writeText(chart)
+      await navigator.clipboard.writeText(showCode ? draftCode : chartCode)
     } catch (err) {
       console.error('Copy failed', err)
     }
+  }
+
+  const handleApplyDraft = () => {
+    try {
+      mermaid.parse(draftCode)
+    } catch (e) {
+      setError(e?.message || 'Failed to parse diagram')
+      return
+    }
+    const prevCode = chartCode
+    setChartCode(draftCode)
+    setShowCode(false)
+    onCodeChange?.(draftCode, prevCode)
   }
 
   const handleDownloadSvg = () => {
@@ -249,36 +263,85 @@ function MermaidBlock({ chart }) {
     img.src = url
   }
 
+  const renderBody = () => {
+    if (error) {
+      return (
+        <div className="mermaid-error-box">
+          <div className="mermaid-error-title">Mermaid parse error</div>
+          <div className="mermaid-error-message">{error}</div>
+          <details className="mermaid-error-details">
+            <summary>Show source</summary>
+            <pre className="language-mermaid"><code>{chartCode}</code></pre>
+          </details>
+        </div>
+      )
+    }
+
+    if (!svg) {
+      return <div className="mermaid-wrapper">Rendering diagram...</div>
+    }
+
+    return (
+      <>
+        <div className="mermaid-toolbar">
+          <button type="button" onClick={handleReset}>Reset</button>
+          <span className="hint">Shift + Scroll to zoom, drag to pan</span>
+        </div>
+        <div
+          className="mermaid-panzoom"
+          key={chartCode}
+          ref={containerRef}
+          onWheelCapture={handleWheel}
+          onMouseDown={handleMouseDown}
+        >
+          <div
+            className="mermaid-panzoom-inner"
+            dangerouslySetInnerHTML={{ __html: svg }}
+          />
+        </div>
+      </>
+    )
+  }
+
   return (
     <div className="mermaid-wrapper">
-      <div className="mermaid-toolbar">
-        <button type="button" onClick={handleReset}>Reset</button>
-        <span className="hint">Shift + Scroll to zoom, drag to pan</span>
-      </div>
-      <div
-        className="mermaid-panzoom"
-        ref={containerRef}
-        onWheelCapture={handleWheel}
-        onMouseDown={handleMouseDown}
-      >
-        <div
-          className="mermaid-panzoom-inner"
-          dangerouslySetInnerHTML={{ __html: svg }}
-        />
-      </div>
+      {adminMode && (
+        <div className="mermaid-admin-bar">
+          <div className="mermaid-admin-left">
+            <button type="button" onClick={() => setShowCode(!showCode)}>
+              {showCode ? 'Hide code' : 'Edit code'}
+            </button>
+            {showCode && draftCode !== chartCode && (
+              <button type="button" onClick={handleApplyDraft}>Render update</button>
+            )}
+          </div>
+          <span className="hint">Admin-only edit</span>
+        </div>
+      )}
+      {adminMode && showCode && (
+        <div className="mermaid-code-editor">
+          <textarea
+            className="mermaid-code-textarea"
+            value={draftCode}
+            onChange={(e) => setDraftCode(e.target.value)}
+            spellCheck={false}
+          />
+        </div>
+      )}
+      {renderBody()}
       <div className="mermaid-actions">
         <button type="button" onClick={handleCopyCode}>Copy code</button>
-        <button type="button" onClick={handleDownloadSvg}>Save SVG</button>
-        <button type="button" onClick={handleDownloadPng}>Save PNG</button>
-        <button type="button" onClick={handleDownloadXml}>Save XML</button>
-        <button type="button" onClick={handleDownloadXaml}>Save XAML</button>
+        <button type="button" onClick={handleDownloadSvg} disabled={!svg}>Save SVG</button>
+        <button type="button" onClick={handleDownloadPng} disabled={!svg}>Save PNG</button>
+        <button type="button" onClick={handleDownloadXml} disabled={!svg}>Save XML</button>
+        <button type="button" onClick={handleDownloadXaml} disabled={!svg}>Save XAML</button>
         <span className="mermaid-caption">with Mermaid</span>
       </div>
     </div>
   )
 }
 
-export function MessageContent({ content, streaming = false }) {
+export function MessageContent({ content, streaming = false, adminMode = false, onContentUpdate }) {
   // Функция для парсинга контента и выделения блока <think>
   const parseContent = (text) => {
     const thinkMatch = text.match(/<think>([\s\S]*?)(?:<\/think>|$)/)
@@ -304,7 +367,20 @@ export function MessageContent({ content, streaming = false }) {
 
       // Avoid rendering Mermaid while the message is streaming to prevent partial syntax errors and reflows
       if (looksMermaid && !streaming) {
-        return <MermaidBlock chart={codeText} />
+        const handleCodeChange = (nextCode, prevCode) => {
+          if (!onContentUpdate) return
+          const previous = prevCode || codeText
+          let newContent
+          if ((previous && content.includes(previous)) || content.includes(codeText)) {
+            const needle = content.includes(previous) ? previous : codeText
+            newContent = content.replace(needle, nextCode)
+          } else {
+            newContent = `${content}\n\n\`\`\`mermaid\n${nextCode}\n\`\`\``
+          }
+          onContentUpdate(newContent)
+        }
+
+        return <MermaidBlock chart={codeText} adminMode={adminMode} onCodeChange={handleCodeChange} />
       }
 
       return (

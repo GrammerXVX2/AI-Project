@@ -15,24 +15,52 @@ class HistoryManager:
         return self.chats_dir / f"{session_id}.json"
 
     def load_history(self, session_id: str) -> List[dict]:
-        """Loads message history from JSON file"""
+        """Loads message history from JSON file (messages only, legacy compatibility)"""
+        data = self.load_session(session_id)
+        return data.get("messages", []) if isinstance(data, dict) else []
+
+    def load_session(self, session_id: str) -> Dict:
+        """Loads full session data (messages, title, summary)"""
         file_path = self._get_file_path(session_id)
         if file_path.exists():
             try:
                 with open(file_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
-                    return data.get("messages", [])
+                    # ensure required keys
+                    data.setdefault("messages", [])
+                    data.setdefault("title", None)
+                    data.setdefault("summary", None)
+                    data.setdefault("summary_checkpoints", [])
+                    data.setdefault("session_id", session_id)
+                    return data
             except Exception as e:
                 print(f"[HISTORY] Error loading {session_id}: {e}")
-                return []
-        return []
+                return {"session_id": session_id, "messages": [], "title": None, "summary": None, "summary_checkpoints": []}
+        return {"session_id": session_id, "messages": [], "title": None, "summary": None, "summary_checkpoints": []}
 
-    def save_history(self, session_id: str, messages: List[dict]):
-        """Saves history to JSON"""
+    def save_history(
+        self,
+        session_id: str,
+        messages: List[dict],
+        title: Optional[str] = None,
+        summary: Optional[str] = None,
+        summary_checkpoints: Optional[list] = None,
+    ):
+        """Saves history to JSON with optional title/summary and checkpoints"""
         file_path = self._get_file_path(session_id)
+        existing = self.load_session(session_id)
+        if title is None:
+            title = existing.get("title")
+        if summary is None:
+            summary = existing.get("summary")
+        if summary_checkpoints is None:
+            summary_checkpoints = existing.get("summary_checkpoints", [])
         data = {
             "session_id": session_id,
             "last_updated": datetime.now().isoformat(),
+            "title": title,
+            "summary": summary,
+            "summary_checkpoints": summary_checkpoints,
             "messages": messages,
         }
         try:
@@ -42,7 +70,7 @@ class HistoryManager:
             print(f"[HISTORY] Error saving {session_id}: {e}")
 
     def get_all_sessions(self) -> List[Dict]:
-        """Returns list of all chat sessions sorted by date"""
+        """Returns list of all chat sessions sorted by date (includes summary if present)"""
         sessions = []
         if self.chats_dir.exists():
             # Sort by modification time (newest first)
@@ -51,18 +79,24 @@ class HistoryManager:
                 try:
                     with open(f, "r", encoding="utf-8") as file:
                         data = json.load(file)
-                        # Use first user message as title or fallback
-                        messages = data.get("messages", [])
-                        first_msg = next(
-                            (m["content"] for m in messages if m["role"] == "user"), "New Chat"
-                        )
-                        title = first_msg[:30]
+                        # Prefer stored title; fallback to first user message
+                        stored_title = data.get("title")
+                        if stored_title:
+                            title = stored_title
+                        else:
+                            messages = data.get("messages", [])
+                            first_msg = next(
+                                (m["content"] for m in messages if m.get("role") == "user"), "New Chat"
+                            )
+                            title = first_msg[:30]
 
                         sessions.append(
                             {
                                 "id": data.get("session_id", f.stem),
                                 "title": title,
                                 "date": data.get("last_updated", ""),
+                                "summary": data.get("summary"),
+                                "summary_checkpoints": data.get("summary_checkpoints", []),
                             }
                         )
                 except:
@@ -83,8 +117,11 @@ class HistoryManager:
     async def aload_history(self, session_id: str):
         return await asyncio.to_thread(self.load_history, session_id)
 
-    async def asave_history(self, session_id: str, messages: List[dict]):
-        await asyncio.to_thread(self.save_history, session_id, messages)
+    async def aload_session(self, session_id: str):
+        return await asyncio.to_thread(self.load_session, session_id)
+
+    async def asave_history(self, session_id: str, messages: List[dict], title: Optional[str] = None, summary: Optional[str] = None):
+        await asyncio.to_thread(self.save_history, session_id, messages, title, summary)
 
     async def aget_all_sessions(self):
         return await asyncio.to_thread(self.get_all_sessions)

@@ -23,6 +23,8 @@ RAG_SOURCE_DIR.mkdir(parents=True, exist_ok=True)
 
 # RAG Settings
 RAG_THRESHOLD = 1.5
+SUMMARY_CHECKPOINT_SIZE = 25
+SUMMARY_MAX_WORDS = 30
 
 # Models Configuration
 MODELS_CONFIG = {
@@ -31,6 +33,12 @@ MODELS_CONFIG = {
         "n_ctx": 1024,
         "n_gpu_layers": -1,
         "type": "router",
+    },
+    "Summarizer": {
+        "path": str(MODELS_DIR / "Llama-3.2-1B-Instruct-Q6_K_L.gguf"),
+        "n_ctx": 2048,
+        "n_gpu_layers": -1,
+        "type": "summary",
     },
     "Coder Agent": {
         "path": str(MODELS_DIR / "qwen2.5-coder-1.5b-instruct-q5_k_m.gguf"),

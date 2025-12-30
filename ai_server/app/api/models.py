@@ -28,8 +28,8 @@ async def load_model(name: str, mode: str = "gpu"):
 
 @router.post("/{name}/unload")
 async def unload_model(name: str):
-    if name == "Orchestrator":
-        raise HTTPException(400, "Cannot unload orchestrator")
+    if name in {"Orchestrator", "Summarizer"}:
+        raise HTTPException(400, "Cannot unload orchestrator or summarizer")
 
     model_manager.unload_model(name)
     return {"status": "unloaded", "name": name}

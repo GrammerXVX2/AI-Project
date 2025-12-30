@@ -12,3 +12,7 @@ class UserRequest(BaseModel):
     temperature: float = 0.7
     repeat_penalty: float = 1.1
     system_prompt: Optional[str] = None
+
+
+class UpdateMessageRequest(BaseModel):
+    content: str

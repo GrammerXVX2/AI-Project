@@ -1,13 +1,17 @@
 import asyncio
 import json
+import traceback
+import re
 import threading
 import uuid
 from datetime import datetime
+from typing import Optional
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
-from ai_server.app.schemas import UserRequest
+from ai_server.app.schemas import UpdateMessageRequest, UserRequest
+from ai_server.app.config import DATA_DIR, SUMMARY_CHECKPOINT_SIZE, SUMMARY_MAX_WORDS
 from ai_server.app.services.history_manager import history_manager
 from ai_server.app.services.model_manager import model_manager
 from ai_server.app.services.rag_service import rag_service
@@ -204,13 +208,31 @@ async def orchestrate_route(user_query: str, context_window):
     return route, confidence, raw
 
 
+def _log_summary_failure(session_id: str, payload: str, reason: str):
+    try:
+        log_path = DATA_DIR / "summary_errors.log"
+        record = {
+            "timestamp": datetime.now().isoformat(),
+            "session_id": session_id,
+            "reason": reason,
+            "payload": payload,
+        }
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except Exception:
+        traceback.print_exc()
+
+
 @router.post("/chat")
 async def process_chat(request: UserRequest):
     user_query = request.prompt
 
     # 1. Session Management
     current_session_id = request.session_id or str(uuid.uuid4())
-    full_history = await history_manager.aload_history(current_session_id)
+    session_data = await history_manager.aload_session(current_session_id)
+    full_history = session_data.get("messages", [])
+    existing_summary = session_data.get("summary")
+    existing_title = session_data.get("title")
 
     # Context Window
     context_window = full_history[-request.history_limit :] if full_history else []
@@ -248,9 +270,10 @@ async def process_chat(request: UserRequest):
         mermaid_type = _guess_mermaid_type(user_query)
         mermaid_hint = (
             "Если отвечаешь Mermaid-диаграммой: используй тип "
-            f"{mermaid_type}. Оборачивай единственный блок в ```mermaid ...```.
-Не используй несуществующие типы (например erdiag), избегай нестандартных style.
-Поддерживаемые типы: graph, sequenceDiagram, classDiagram, stateDiagram, erDiagram, gantt, journey, gitGraph.")
+            f"{mermaid_type}. Оборачивай единственный блок в ```mermaid ...```.\n"
+            "Не используй несуществующие типы (например erdiag), избегай нестандартных style.\n"
+            "Поддерживаемые типы: graph, sequenceDiagram, classDiagram, stateDiagram, erDiagram, gantt, journey, gitGraph."
+        )
 
     if request.system_prompt and request.system_prompt.strip():
         system_msg = request.system_prompt
@@ -297,11 +320,142 @@ async def process_chat(request: UserRequest):
     else:
         current_content = user_query
 
+    summary_system = []
+    if existing_summary:
+        summary_system.append({"role": "system", "content": f"Сжатая выжимка чата: {existing_summary}"})
+
     final_messages = (
         [{"role": "system", "content": system_msg}]
+        + summary_system
         + messages_payload
         + [{"role": "user", "content": current_content}]
     )
+
+    async def summarize_chat(history: list, prev_summary: Optional[str]):
+        summarizer = model_manager.get_model("Summarizer")
+        if summarizer is None:
+            summarizer = model_manager.load_model("Summarizer")
+        if summarizer is None:
+            print("[SUMMARY] Summarizer model unavailable")
+            return None, None
+
+        # Take recent messages and previous summary to build a short title/summary JSON
+        recent = history[-12:]
+        lines = []
+        for m in recent:
+            role = m.get("role", "")
+            content = (m.get("content") or "")[:500]
+            if content:
+                lines.append(f"{role}: {content}")
+        messages_text = "\n".join(lines) if lines else "(empty)"
+
+        sys = (
+            "Ты ассистент, делаешь краткий вывод по диалогу. Верни строго JSON без пояснений: "
+            "{\"title\":\"краткий заголовок <= 8 слов\",\"summary\":\"выжимка 20-30 слов\"}."
+        )
+        usr = (
+            f"Предыдущая выжимка: {prev_summary or '(нет)'}\n"
+            f"Сообщения:\n{messages_text}"
+        )
+
+        def _safe_title_summary(title: str, summary: str):
+            t = (title or "").strip()
+            s = (summary or "").strip()
+
+            def _fallback_title():
+                if s:
+                    return " ".join(s.split()[:8])
+                first_user = next((m.get("content", "") for m in history if m.get("role") == "user" and m.get("content")), "")
+                return " ".join(first_user.split()[:8]) or "Chat"
+
+            bad_title = not t or "краткий заголовок" in t.lower() or "title" in t.lower() or "<=" in t or "слов" in t.lower()
+            if bad_title:
+                t = _fallback_title()
+            return t or None, s or None
+
+        def _call():
+            return summarizer.create_chat_completion(
+                messages=[
+                    {"role": "system", "content": sys},
+                    {"role": "user", "content": usr},
+                ],
+                max_tokens=180,
+                temperature=0.2,
+                top_p=0.3,
+                stop=["<", "```"],
+            )
+
+        try:
+            res = await asyncio.to_thread(_call)
+            content = (
+                (res.get("choices", [{}])[0].get("message", {}) or {}).get("content")
+                or ""
+            )
+            # try to extract JSON
+            if "{" in content and "}" in content:
+                start = content.find("{")
+                end = content.rfind("}")
+                blob = content[start : end + 1]
+            else:
+                blob = content
+            try:
+                data = json.loads(blob)
+                title = str(data.get("title") or "").strip()
+                summary = str(data.get("summary") or "").strip()
+                return _safe_title_summary(title, summary)
+            except Exception:
+                print(f"[SUMMARY] Non-JSON summary response: {blob!r}")
+                _log_summary_failure(current_session_id, blob, "non_json")
+                # Try strict retry without <think>
+                def _strict_call():
+                    strict_sys = (
+                        "Верни строго JSON без пояснений и без <think>. "
+                        f"Формат: {{\"title\":\"краткий заголовок <= 8 слов\",\"summary\":\"выжимка до {SUMMARY_MAX_WORDS} слов\"}}. "
+                        "Никакого текста вне JSON."
+                    )
+                    strict_usr = usr
+                    return summarizer.create_chat_completion(
+                        messages=[
+                            {"role": "system", "content": strict_sys},
+                            {"role": "user", "content": strict_usr},
+                        ],
+                        max_tokens=160,
+                        temperature=0.0,
+                        top_p=0.1,
+                        stop=["<", "```"],
+                    )
+
+                try:
+                    strict_res = await asyncio.to_thread(_strict_call)
+                    strict_content = (
+                        (strict_res.get("choices", [{}])[0].get("message", {}) or {}).get("content")
+                        or ""
+                    )
+                    if "{" in strict_content and "}" in strict_content:
+                        s_start = strict_content.find("{")
+                        s_end = strict_content.rfind("}")
+                        strict_blob = strict_content[s_start : s_end + 1]
+                    else:
+                        cleaned = re.sub(r"<think>[\s\S]*?</think>", "", strict_content).strip()
+                        if "{" in cleaned and "}" in cleaned:
+                            s_start = cleaned.find("{")
+                            s_end = cleaned.rfind("}")
+                            strict_blob = cleaned[s_start : s_end + 1]
+                        else:
+                            strict_blob = strict_content
+
+                    data = json.loads(strict_blob)
+                    title = str(data.get("title") or "").strip()
+                    summary = str(data.get("summary") or "").strip()
+                    return _safe_title_summary(title, summary)
+                except Exception:
+                    print(f"[SUMMARY] Strict retry failed: {strict_content if 'strict_content' in locals() else ''!r}")
+                    _log_summary_failure(current_session_id, strict_content if 'strict_content' in locals() else traceback.format_exc(), "strict_fail")
+                    return None, None
+        except Exception as e:
+            print(f"[SUMMARY] Failed to summarize chat {current_session_id}: {e}")
+            _log_summary_failure(current_session_id, traceback.format_exc(), "exception")
+            return None, None
 
     # Streaming Generator
     async def generate_stream():
@@ -358,8 +512,6 @@ async def process_chat(request: UserRequest):
             yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
         finally:
-            model_manager.set_all_idle()
-
             # Save History
             full_history.append(
                 {"role": "user", "content": user_query, "timestamp": str(datetime.now())}
@@ -367,7 +519,53 @@ async def process_chat(request: UserRequest):
             full_history.append(
                 {"role": "assistant", "content": full_response, "timestamp": str(datetime.now())}
             )
-            await history_manager.asave_history(current_session_id, full_history)
+
+            new_title, new_summary = existing_title, existing_summary
+            # Правила обновления:
+            # - заголовок: после первого сообщения (message_count >= 1), если его ещё нет
+            # - первая выжимка: один раз после >= 3 сообщений, если ещё нет summary
+            # - далее: когда число сообщений кратно history_limit
+            safe_limit = max(1, request.history_limit)
+            message_count = len(full_history)
+            initial_title_needed = existing_title is None and message_count >= 1
+            initial_summary_needed = existing_summary is None and message_count >= 3
+            periodic_needed = message_count >= safe_limit and message_count % safe_limit == 0
+            checkpoint_due = message_count % SUMMARY_CHECKPOINT_SIZE == 0
+            should_summarize = initial_title_needed or initial_summary_needed or periodic_needed or checkpoint_due
+
+            if agent is not None and should_summarize:
+                t, s = await summarize_chat(full_history, existing_summary)
+                if t:
+                    new_title = t
+                if s:
+                    new_summary = s
+
+                # Checkpoint summary over recent window
+                if checkpoint_due:
+                    window = full_history[-SUMMARY_CHECKPOINT_SIZE:]
+                    ct, cs = await summarize_chat(window, None)
+                    if cs:
+                        existing_checkpoints = session_data.get("summary_checkpoints", [])
+                        start_idx = max(1, message_count - SUMMARY_CHECKPOINT_SIZE + 1)
+                        end_idx = message_count
+                        existing_checkpoints.append(
+                            {
+                                "range": f"{start_idx}-{end_idx}",
+                                "summary": cs,
+                                "created_at": datetime.now().isoformat(),
+                            }
+                        )
+                        session_data["summary_checkpoints"] = existing_checkpoints
+
+            await history_manager.asave_history(
+                current_session_id,
+                full_history,
+                title=new_title,
+                summary=new_summary,
+                summary_checkpoints=session_data.get("summary_checkpoints", []),
+            )
+
+            model_manager.set_all_idle()
 
     return StreamingResponse(generate_stream(), media_type="text/event-stream")
 
@@ -377,9 +575,35 @@ async def get_sessions():
     return await history_manager.aget_all_sessions()
 
 
+@router.get("/sessions/summary")
+async def get_sessions_with_summary():
+    """Admin-oriented endpoint: returns sessions with summaries (no auth yet)."""
+    return await history_manager.aget_all_sessions()
+
+
 @router.get("/history/{session_id}")
 async def get_history(session_id: str):
     return await history_manager.aload_history(session_id)
+
+
+@router.put("/history/{session_id}/message/{index}")
+async def update_message(session_id: str, index: int, payload: UpdateMessageRequest):
+    session = await history_manager.aload_session(session_id)
+    messages = session.get("messages", [])
+    if index < 0 or index >= len(messages):
+        raise HTTPException(status_code=404, detail="Message not found")
+
+    messages[index]["content"] = payload.content
+    messages[index]["updated_at"] = datetime.now().isoformat()
+
+    await history_manager.asave_history(
+        session_id,
+        messages,
+        title=session.get("title"),
+        summary=session.get("summary"),
+    )
+
+    return {"status": "updated", "session_id": session_id, "index": index}
 
 
 @router.delete("/history/{session_id}")
@@ -388,3 +612,4 @@ async def delete_history(session_id: str):
     if success:
         return {"status": "deleted", "session_id": session_id}
     raise HTTPException(status_code=404, detail="Session not found")
+    
