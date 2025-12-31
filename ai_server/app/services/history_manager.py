@@ -120,8 +120,22 @@ class HistoryManager:
     async def aload_session(self, session_id: str):
         return await asyncio.to_thread(self.load_session, session_id)
 
-    async def asave_history(self, session_id: str, messages: List[dict], title: Optional[str] = None, summary: Optional[str] = None):
-        await asyncio.to_thread(self.save_history, session_id, messages, title, summary)
+    async def asave_history(
+        self,
+        session_id: str,
+        messages: List[dict],
+        title: Optional[str] = None,
+        summary: Optional[str] = None,
+        summary_checkpoints: Optional[list] = None,
+    ):
+        await asyncio.to_thread(
+            self.save_history,
+            session_id,
+            messages,
+            title,
+            summary,
+            summary_checkpoints,
+        )
 
     async def aget_all_sessions(self):
         return await asyncio.to_thread(self.get_all_sessions)

@@ -252,6 +252,13 @@ async def process_chat(request: UserRequest):
         f"[ORCHESTRATOR] Raw={raw_decision} -> {decision} (conf={confidence:.2f}) | Session: {current_session_id}"
     )
 
+    # Admin-only adjustable checkpoint size (fallback to default if no admin key).
+    checkpoint_size_default = SUMMARY_CHECKPOINT_SIZE
+    checkpoint_size = checkpoint_size_default
+    if request.admin_key and request.summary_checkpoint_size:
+        # Clamp to sane bounds to avoid excessive summary calls.
+        checkpoint_size = max(3, min(200, request.summary_checkpoint_size))
+
     rag_context = None
 
     # 3. Prepare Messages
@@ -292,15 +299,29 @@ async def process_chat(request: UserRequest):
     # Fallback Logic
     agent_name = target_agent
     if not model_manager.get_model(agent_name):
-        # Check loaded models
-        loaded = model_manager.loaded_models.keys()
-        alternatives = [k for k in loaded if k != ORCHESTRATOR_MODEL]
-        if alternatives:
-            agent_name = alternatives[0]
+        loaded = list(model_manager.loaded_models.keys())
+
+        def pick_fallback(preferred: str, secondary: str):
+            for name in (preferred, secondary):
+                if name and name in loaded:
+                    return name
+            for name in loaded:
+                if name in {ORCHESTRATOR_MODEL, "Summarizer"}:
+                    continue
+                return name
+            return None
+
+        fallback = pick_fallback(
+            CHATTER_MODEL if decision == "CHAT" else CODER_MODEL,
+            CODER_MODEL if decision == "CHAT" else CHATTER_MODEL,
+        )
+
+        if fallback:
+            agent_name = fallback
             print(f"[LOGIC] '{target_agent}' missing. Switching to '{agent_name}'.")
         else:
             return {
-                "response": f"⚠️ No active models found. Please load '{CODER_MODEL}' or '{CHATTER_MODEL}'.",
+                "response": f"⚠️ No active chat/coding models found. Please load '{CODER_MODEL}' or '{CHATTER_MODEL}'.",
                 "category": decision,
                 "rag_used": bool(rag_context),
                 "session_id": current_session_id,
@@ -332,26 +353,75 @@ async def process_chat(request: UserRequest):
     )
 
     async def summarize_chat(history: list, prev_summary: Optional[str]):
+        def _clean_text(text: str) -> str:
+            # Drop fenced/inline code and trim noisy symbols.
+            cleaned = re.sub(r"```[\s\S]*?```", " ", text)
+            cleaned = re.sub(r"`[^`]*`", " ", cleaned)
+            cleaned = re.sub(r"[{}<>];", " ", cleaned)
+            cleaned = re.sub(r"\s+", " ", cleaned)
+            return cleaned.strip()
+
+        def _normalize(text: str) -> str:
+            base = re.sub(r"[^\w\s]", " ", text.lower())
+            return re.sub(r"\s+", " ", base).strip()
+
+        def _detect_language(text: str) -> str:
+            low = text.lower()
+            if "c#" in low or "csharp" in low or "using system" in low:
+                return "C#"
+            if "python" in low or "def " in low or "import " in low:
+                return "Python"
+            if "javascript" in low or "typescript" in low or "console.log" in low or "node" in low:
+                return "JavaScript"
+            if "java" in low and "public class" in low:
+                return "Java"
+            if "rust" in low or "fn main" in low:
+                return "Rust"
+            if "go" in low and "func main" in low:
+                return "Go"
+            return "неизвестно"
+
+        def _fallback_from_history(history: list, max_words: int = SUMMARY_MAX_WORDS):
+            # Heuristic fallback when the summarizer misbehaves: take recent plain text, drop code, add language hint.
+            recent_texts = []
+            for m in reversed(history):
+                content = (m.get("content") or "").strip()
+                if content:
+                    recent_texts.append(content)
+                if len(recent_texts) >= 2:
+                    break
+            merged = " ".join(recent_texts)[:1200]
+            cleaned = _clean_text(merged)
+            lang = _detect_language(cleaned)
+            summary_body = " ".join(cleaned.split()[:max_words]) if cleaned else "Диалог продолжается."
+            summary = f"Язык: {lang}. {summary_body}".strip()
+            title = " ".join(summary_body.split()[:8]) or "Chat"
+            return title, summary
+
         summarizer = model_manager.get_model("Summarizer")
         if summarizer is None:
             summarizer = model_manager.load_model("Summarizer")
         if summarizer is None:
             print("[SUMMARY] Summarizer model unavailable")
-            return None, None
+            return _fallback_from_history(history)
 
-        # Take recent messages and previous summary to build a short title/summary JSON
+        # Take recent messages, drop most code/noise, and build a short context block.
         recent = history[-12:]
         lines = []
         for m in recent:
             role = m.get("role", "")
             content = (m.get("content") or "")[:500]
             if content:
+                content = _clean_text(content)
+                if not content:
+                    continue
                 lines.append(f"{role}: {content}")
         messages_text = "\n".join(lines) if lines else "(empty)"
 
         sys = (
-            "Ты ассистент, делаешь краткий вывод по диалогу. Верни строго JSON без пояснений: "
-            "{\"title\":\"краткий заголовок <= 8 слов\",\"summary\":\"выжимка 20-30 слов\"}."
+            "Ты ассистент, делаешь краткий вывод по диалогу на русском языке. Верни строго JSON без пояснений: "
+            "{\"title\":\"краткий заголовок <= 8 слов\",\"summary\":\"выжимка 20-30 слов, без кода и без markdown, укажи язык если понятен (например 'Язык: C#')\"}."
+            " Не добавляй кавычки вне JSON, не используй markdown и не копируй текст сообщения дословно."
         )
         usr = (
             f"Предыдущая выжимка: {prev_summary or '(нет)'}\n"
@@ -402,6 +472,16 @@ async def process_chat(request: UserRequest):
                 data = json.loads(blob)
                 title = str(data.get("title") or "").strip()
                 summary = str(data.get("summary") or "").strip()
+                if not summary:
+                    return _fallback_from_history(history)
+                # If summarizer parrots the input, fall back.
+                if summary.lower() in messages_text.lower():
+                    return _fallback_from_history(history)
+                # Heuristic: if normalized summary is mostly contained in normalized context, treat as parroting.
+                norm_sum = _normalize(summary)
+                norm_ctx = _normalize(messages_text)
+                if norm_sum and norm_sum[:120] in norm_ctx:
+                    return _fallback_from_history(history)
                 return _safe_title_summary(title, summary)
             except Exception:
                 print(f"[SUMMARY] Non-JSON summary response: {blob!r}")
@@ -447,15 +527,23 @@ async def process_chat(request: UserRequest):
                     data = json.loads(strict_blob)
                     title = str(data.get("title") or "").strip()
                     summary = str(data.get("summary") or "").strip()
+                    if not summary:
+                        return _fallback_from_history(history)
+                    if summary.lower() in messages_text.lower():
+                        return _fallback_from_history(history)
+                    norm_sum = _normalize(summary)
+                    norm_ctx = _normalize(messages_text)
+                    if norm_sum and norm_sum[:120] in norm_ctx:
+                        return _fallback_from_history(history)
                     return _safe_title_summary(title, summary)
                 except Exception:
                     print(f"[SUMMARY] Strict retry failed: {strict_content if 'strict_content' in locals() else ''!r}")
                     _log_summary_failure(current_session_id, strict_content if 'strict_content' in locals() else traceback.format_exc(), "strict_fail")
-                    return None, None
+                    return _fallback_from_history(history)
         except Exception as e:
             print(f"[SUMMARY] Failed to summarize chat {current_session_id}: {e}")
             _log_summary_failure(current_session_id, traceback.format_exc(), "exception")
-            return None, None
+            return _fallback_from_history(history)
 
     # Streaming Generator
     async def generate_stream():
@@ -530,7 +618,7 @@ async def process_chat(request: UserRequest):
             initial_title_needed = existing_title is None and message_count >= 1
             initial_summary_needed = existing_summary is None and message_count >= 3
             periodic_needed = message_count >= safe_limit and message_count % safe_limit == 0
-            checkpoint_due = message_count % SUMMARY_CHECKPOINT_SIZE == 0
+            checkpoint_due = message_count % checkpoint_size == 0
             should_summarize = initial_title_needed or initial_summary_needed or periodic_needed or checkpoint_due
 
             if agent is not None and should_summarize:
@@ -542,11 +630,11 @@ async def process_chat(request: UserRequest):
 
                 # Checkpoint summary over recent window
                 if checkpoint_due:
-                    window = full_history[-SUMMARY_CHECKPOINT_SIZE:]
+                    window = full_history[-checkpoint_size:]
                     ct, cs = await summarize_chat(window, None)
                     if cs:
                         existing_checkpoints = session_data.get("summary_checkpoints", [])
-                        start_idx = max(1, message_count - SUMMARY_CHECKPOINT_SIZE + 1)
+                        start_idx = max(1, message_count - checkpoint_size + 1)
                         end_idx = message_count
                         existing_checkpoints.append(
                             {

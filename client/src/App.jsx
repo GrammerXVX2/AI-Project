@@ -49,6 +49,7 @@ function App() {
   const [preferredLanguage, setPreferredLanguage] = useState(() => getStoredSetting('preferredLanguage', 'ru'))
   const [systemPrompt, setSystemPrompt] = useState(() => getStoredSetting('systemPrompt', ''))
   const [adminKey, setAdminKey] = useState(() => getStoredSetting('adminKey', ''))
+  const [checkpointSize, setCheckpointSize] = useState(() => getStoredSetting('checkpointSize', 25))
   const [mySessionIds, setMySessionIds] = useState(() => {
     try {
       const saved = localStorage.getItem('my-session-ids')
@@ -61,6 +62,7 @@ function App() {
   const [isSummaryOpen, setIsSummaryOpen] = useState(false)
   const [summaries, setSummaries] = useState([])
   const [expandedSummaries, setExpandedSummaries] = useState({})
+  const [expandedCheckpoints, setExpandedCheckpoints] = useState({})
   const messagesEndRef = useRef(null)
   const textareaRef = useRef(null)
   const abortControllerRef = useRef(null)
@@ -100,10 +102,11 @@ function App() {
       repeatPenalty,
       preferredLanguage,
       systemPrompt,
-      adminKey
+      adminKey,
+      checkpointSize,
     }
     localStorage.setItem('ai-chat-settings', JSON.stringify(settings))
-  }, [useRag, historyLimit, maxTokens, temperature, repeatPenalty, preferredLanguage, systemPrompt, adminKey])
+  }, [useRag, historyLimit, maxTokens, temperature, repeatPenalty, preferredLanguage, systemPrompt, adminKey, checkpointSize])
 
   // Save mySessionIds
   useEffect(() => {
@@ -138,6 +141,10 @@ function App() {
 
   const toggleSummaryExpanded = (id) => {
     setExpandedSummaries(prev => ({ ...prev, [id]: !prev[id] }))
+  }
+
+  const toggleCheckpoints = (id) => {
+    setExpandedCheckpoints(prev => ({ ...prev, [id]: !prev[id] }))
   }
 
   const openSummaries = () => {
@@ -319,21 +326,28 @@ function App() {
     setMessages(prev => [...prev, { role: 'assistant', content: '', streaming: true }])
 
     try {
+      const payload = {
+        prompt: userMessage.content,
+        use_rag: useRag,
+        history_limit: historyLimit,
+        max_tokens: maxTokens,
+        temperature: temperature,
+        repeat_penalty: repeatPenalty,
+        system_prompt: finalSystemPrompt,
+        session_id: sessionId
+      }
+
+      if (adminKey) {
+        payload.admin_key = adminKey
+        payload.summary_checkpoint_size = checkpointSize
+      }
+
       const response = await fetch('http://localhost:8000/api/chat', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          prompt: userMessage.content,
-          use_rag: useRag,
-          history_limit: historyLimit,
-          max_tokens: maxTokens,
-          temperature: temperature,
-          repeat_penalty: repeatPenalty,
-          system_prompt: finalSystemPrompt,
-          session_id: sessionId
-        }),
+        body: JSON.stringify(payload),
         signal: abortControllerRef.current.signal
       })
 
@@ -482,6 +496,7 @@ function App() {
         preferredLanguage={preferredLanguage} setPreferredLanguage={setPreferredLanguage}
         systemPrompt={systemPrompt} setSystemPrompt={setSystemPrompt}
         adminKey={adminKey} setAdminKey={setAdminKey}
+        checkpointSize={checkpointSize} setCheckpointSize={setCheckpointSize}
       />
 
       {isSummaryOpen && (
@@ -500,8 +515,35 @@ function App() {
                     <span style={{ color: '#888', fontSize: '0.8rem' }}>{item.date}</span>
                   </div>
                   {item.summary_checkpoints && item.summary_checkpoints.length > 0 && (
-                    <div style={{ color: '#94a3b8', fontSize: '0.8rem', marginBottom: '0.35rem' }}>
-                      Чекпоинтов: {item.summary_checkpoints.length}
+                    <div style={{ marginBottom: '0.5rem' }}>
+                      <button
+                        style={{
+                          background: '#111827',
+                          border: '1px solid #334155',
+                          color: '#e2e8f0',
+                          borderRadius: '6px',
+                          padding: '4px 8px',
+                          cursor: 'pointer'
+                        }}
+                        onClick={() => toggleCheckpoints(item.id)}
+                      >
+                        Чекпоинты: {item.summary_checkpoints.length} {expandedCheckpoints[item.id] ? '▲' : '▼'}
+                      </button>
+                      {expandedCheckpoints[item.id] && (
+                        <div style={{ marginTop: '0.35rem', display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                          {item.summary_checkpoints.map((cp, idx) => (
+                            <div key={idx} style={{ border: '1px solid #1f2937', borderRadius: '6px', padding: '0.5rem', background: '#0f172a' }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', color: '#94a3b8', fontSize: '0.8rem', marginBottom: '0.25rem' }}>
+                                <span>Диапазон: {cp.range}</span>
+                                {cp.created_at && <span>{cp.created_at}</span>}
+                              </div>
+                              <div style={{ color: '#cbd5e1', whiteSpace: 'pre-wrap', fontSize: '0.9rem' }}>
+                                {cp.summary || '—'}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   )}
                   <div style={{ color: '#cbd5e1', whiteSpace: 'pre-wrap' }}>

@@ -12,7 +12,8 @@ export function SettingsModal({
   repeatPenalty, setRepeatPenalty,
   preferredLanguage, setPreferredLanguage,
   systemPrompt, setSystemPrompt,
-  adminKey, setAdminKey
+  adminKey, setAdminKey,
+  checkpointSize, setCheckpointSize
 }) {
   if (!isOpen) return null
 
@@ -108,6 +109,23 @@ export function SettingsModal({
             />
             <p className="setting-desc">Required to load/unload models.</p>
           </div>
+
+          {adminKey && (
+            <div className="setting-group">
+              <div className="setting-label">
+                <label>Summary Checkpoint Interval</label>
+                <span className="value-badge">{checkpointSize} msgs</span>
+              </div>
+              <input
+                type="range"
+                min="3"
+                max="200"
+                value={checkpointSize}
+                onChange={(e) => setCheckpointSize(parseInt(e.target.value))}
+              />
+              <p className="setting-desc">Admin-only: how many messages between summary checkpoints.</p>
+            </div>
+          )}
 
           <div className="setting-group">
             <label>Preferred Language</label>
