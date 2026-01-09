@@ -3,20 +3,20 @@
 
 The backend has been refactored into a modular architecture:
 
-- **`ai_server/app/`**: Core application code.
+- **`backend/app/`**: Core application code.
   - **`main.py`**: Entry point.
   - **`config.py`**: Central configuration.
   - **`api/`**: API Routers (`chat`, `models`, `system`).
   - **`services/`**: Business logic (`model_manager`, `rag_service`, `history_manager`).
   - **`utils/`**: Utilities (`system_monitor`).
-- **`ai_server/data/`**: Data storage (`chats`, `rag_db`).
+- **`backend/data/`**: Data storage (`chats`, `rag_db`).
 
 ### 🚀 Running the New Server
 
 Run the server using the new entry point:
 
 ```powershell
-uvicorn ai_server.app.main:app --reload --host 0.0.0.0 --port 8000
+uvicorn backend.app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 ### 🛠️ Services

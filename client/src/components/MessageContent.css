@@ -212,3 +212,94 @@
   color: #e5e7eb;
   margin-top: 0.5rem;
 }
+
+/* Code Block Styles */
+.code-block-wrapper {
+  margin: 1.5rem 1rem; /* Added side margin to prevent shadow clipping */
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.06); /* Subtle border */
+  background-color: #1e1e1e; /* VS Code-like dark gray background */
+  box-shadow: 1px 1px 5px rgba(0, 0, 0, 0.6); /* Pronounced diagonal shadow */
+}
+
+.code-block-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem 1rem;
+  background-color: #2d2d2d; /* Lighter header */
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  font-family: system-ui, -apple-system, sans-serif;
+  font-size: 0.8rem;
+  color: #a0a0a0;
+  font-weight: 500;
+}
+
+.code-lang {
+  text-transform: uppercase;
+  font-size: 0.75rem;
+  letter-spacing: 0.05em;
+  color: #e0e0e0;
+}
+
+.code-copy-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: transparent;
+  border: none;
+  color: #a0a0a0;
+  cursor: pointer;
+  font-size: 0.75rem;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+
+.code-copy-btn:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.code-block-content {
+  padding: 1rem;
+  overflow-x: auto;
+  font-size: 0.9rem;
+}
+
+.code-block-content pre {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  border: none;
+}
+
+.code-block-content code {
+  font-family: 'Fira Code', 'Cascadia Code', Consolas, 'Courier New', monospace;
+  line-height: 1.6;
+}
+
+
+/* Global overrides for pre blocks to remove double background */
+.markdown pre {
+  background-color: transparent !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+/* Ensure code inside pre doesn't get its own background */
+.markdown pre code {
+  background-color: transparent !important;
+  padding: 0;
+  border: none;
+}
+
+
+/* Force override for line numbers if inline styles fail */
+.code-block-content span[style*='user-select: none'] {
+  color: #858585 !important;
+}
+

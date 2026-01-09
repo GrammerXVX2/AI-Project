@@ -1,7 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { ChevronDown, ChevronRight } from 'lucide-react'
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
+import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism'
+import { ChevronDown, ChevronRight, Copy, Check } from 'lucide-react'
 import mermaid from 'mermaid'
 import './MessageContent.css'
 
@@ -341,6 +343,41 @@ function MermaidBlock({ chart, adminMode = false, onCodeChange }) {
   )
 }
 
+function CodeBlock({ language, codeText }) {
+  const [copied, setCopied] = useState(false)
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(codeText || '')
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
+  return (
+    <div className="code-block-wrapper">
+      <div className="code-block-header">
+        <span className="code-lang">{language || 'text'}</span>
+        <button className="code-copy-btn" onClick={handleCopy} title="Copy code">
+          {copied ? <Check size={14} className="copied-icon" /> : <Copy size={14} />}
+          <span>{copied ? 'Copied' : 'Copy'}</span>
+        </button>
+      </div>
+      <div className="code-block-content">
+        <SyntaxHighlighter
+          language={language || 'text'}
+          style={vscDarkPlus}
+          showLineNumbers={true}
+          customStyle={{ margin: 0, padding: 0, background: 'transparent', fontSize: '0.9rem' }}
+          lineNumberStyle={{ minWidth: '2.5em', paddingRight: '1em', color: '#6e7681', textAlign: 'right', userSelect: 'none', opacity: 0.7 }}
+          wrapLines={true}
+          PreTag="div"
+        >
+          {codeText}
+        </SyntaxHighlighter>
+      </div>
+    </div>
+  )
+}
+
 export function MessageContent({ content, streaming = false, adminMode = false, onContentUpdate }) {
   // Функция для парсинга контента и выделения блока <think>
   const parseContent = (text) => {
@@ -381,6 +418,12 @@ export function MessageContent({ content, streaming = false, adminMode = false, 
         }
 
         return <MermaidBlock chart={codeText} adminMode={adminMode} onCodeChange={handleCodeChange} />
+      }
+
+      if (!inline) {
+        return (
+          <CodeBlock language={language} codeText={codeText} />
+        )
       }
 
       return (

@@ -10,6 +10,27 @@
 >
 > В репозитории **НЕТ** папки `Scripts/` и `Lib/` - это виртуальное окружение Python, которое генерируется автоматически. Это правильно! ✅
 
+### 🧩 Требования окружения (текущее рабочее)
+
+- Python 3.12.10 (venv)
+- PyTorch 2.5.1+cu121
+- CUDA runtime 12.1
+- NVIDIA Driver 591.44
+- GPU доступен: да (`torch.cuda.is_available() == True`)
+
+Установщики (лежат локально в папке `installer/` в корне проекта):
+
+- Python 3.12.12 (Windows x64) — installer/python-3.12.10.exe
+- NVIDIA CUDA Toolkit 12.1 (Windows) — installer/cuda_12.1_windows.exe
+
+Проверить у себя:
+
+```powershell
+.\venv\Scripts\python.exe --version
+.\venv\Scripts\python.exe -m pip show torch
+nvidia-smi --query-gpu=driver_version --format=csv,noheader
+```
+
 ### 1️⃣ **Создание Virtual Environment**
 
 После клонирования репозитория, создайте виртуальное окружение:
@@ -106,16 +127,18 @@ project/
 ├── venv/                   # 🚫 Не в git - создается локально!
 │   ├── Scripts/           # Python окружение (Windows)
 │   └── Lib/               # Установленные пакеты
-├── ai_server/             # Основной проект
-│   ├── main.py            # Главный файл
-│   ├── ImGen.py           # Image Generation
-│   ├── ingest.py          # Data Ingestion
-│   ├── monitor.py         # Monitoring
-│   ├── chats/             # Chat data (не в git)
-│   ├── models/            # ML Models (не в git)
-│   ├── rag_db/            # RAG Database (не в git)
-│   ├── static/            # Static files
-│   └── RAG data/          # 📊 RAG documents (маленькие данные)
+├── backend/               # Основной backend
+│   ├── app/               # FastAPI приложение
+│   │   ├── main.py        # Точка входа FastAPI
+│   │   ├── config.py      # Настройки путей/моделей
+│   │   ├── api/           # Роутеры (chat, models, system, image)
+│   │   ├── services/      # Логика (model_manager, rag_service, history_manager, image_generation_service)
+│   │   └── utils/         # Утилиты (system_monitor)
+│   ├── data/              # chats/, rag_db/ (локально, не в git)
+│   ├── static/            # Статика (в т.ч. RAG source)
+│   ├── models/            # Модели (локально, не в git)
+│   ├── ingest.py          # Наполнение базы RAG
+│   └── image-generation-[LEGACY].py
 ├── client/                # Frontend client
 ├── requirements.txt       # 📋 Список зависимостей
 ├── .gitignore            # Что НЕ коммитится
